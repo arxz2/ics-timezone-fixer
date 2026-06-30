@@ -1,0 +1,71 @@
+name: Update and Publish Calendar
+
+on:
+  schedule:
+    # Запуск 2 раза в сутки: в 05:00 и в 17:00 по UTC
+    - cron: '0 5,17 * * *'
+  workflow_dispatch: # Позволяет запускать экшен вручную из вкладки Actions
+
+# Разрешения для работы с GitHub Pages
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    # Требуется для actions/deploy-pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        cache: 'pip' # Кэширование зависимостей для ускорения сборки
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    - name: Run calendar processing script
+      env:
+        # Передаем наш секрет в переменную окружения, которую читает скрипт
+        ICS_SOURCE_URL: ${{ secrets.ENV_SOURCE_URL }}
+      run: |
+        python ics_timezone_fixer.py
+
+    - name: Prepare artifact for Pages
+      env:
+        # Секретное неугадываемое имя файла (например a7f3c9e2b8d14f60).
+        # Подписочный URL: https://<user>.github.io/<repo>/<CALENDAR_SLUG>.ics
+        CALENDAR_SLUG: ${{ secrets.CALENDAR_SLUG }}
+      run: |
+        if [ -z "$CALENDAR_SLUG" ]; then
+          echo "::error::Не задан секрет CALENDAR_SLUG"; exit 1
+        fi
+        # Создаем папку public, откуда GitHub Pages будет раздавать файлы.
+        mkdir -p public
+        # Скрипт сохраняет файл как processed_calendar.ics -> публикуем под секретным именем.
+        mv processed_calendar.ics "public/${CALENDAR_SLUG}.ics"
+
+        # Заглушка для корня сайта, чтобы он не отдавал 404.
+        # ВАЖНО: не ссылаемся на .ics и не перечисляем его — имя должно оставаться секретным.
+        echo "Nothing here." > public/index.html
+
+    - name: Upload artifact
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: 'public/'
+
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4

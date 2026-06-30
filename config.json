@@ -3,6 +3,7 @@
   "source_url": "",
   "tzid_map": {
     "Central European Standard Time": "Central Europe Standard Time",
+    "Romance Standard Time": "Europe/Paris",
     "Russian Standard Time": "Europe/Moscow"
   },
   "rules": [
@@ -11,7 +12,11 @@
       "action": "delete"
     },
     {
-      "match": "AcuHealth Session",
+      "match": "Canceled: *",
+      "action": "delete"
+    },
+    {
+      "match": "AcuHealth Session*",
       "action": "delete"
     },
     {
