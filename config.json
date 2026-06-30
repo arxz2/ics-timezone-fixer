@@ -1,0 +1,25 @@
+{
+  "output_file": "processed_calendar.ics",
+  "source_url": "",
+  "tzid_map": {
+    "Central European Standard Time": "Central Europe Standard Time",
+    "Russian Standard Time": "Europe/Moscow"
+  },
+  "rules": [
+    {
+      "match": "Declined: *",
+      "action": "delete"
+    },
+    {
+      "match": "AcuHealth Session",
+      "action": "delete"
+    },
+    {
+      "match": "JustAnExample",
+      "action": "change_timezone",
+      "parameters": {
+        "new_tz": "Europe/Belgrade"
+      }
+    }
+  ]
+}
