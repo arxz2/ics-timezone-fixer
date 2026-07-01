@@ -22,10 +22,7 @@
     },
     {
       "match": "Canceled: *",
-      "action": "set_status",
-      "parameters": {
-        "status": "CANCELLED"
-      }
+      "action": "cancel"
     },
     {
       "match": "AcuHealth Session*",

@@ -261,11 +261,17 @@ def relabel_tzid(event: Calendar, new_tzid: str) -> int:
     return changed
 
 
-def apply_rules(event: Calendar, rules: list[dict[str, Any]], stats: dict[str, int]) -> bool:
+def apply_rules(
+    event: Calendar,
+    rules: list[dict[str, Any]],
+    stats: dict[str, int],
+    masters: dict[str, Any],
+) -> bool:
     """Применяет правила к событию по порядку.
 
     Возвращает ``True``, если событие нужно удалить. Первое сработавшее правило
-    ``delete`` прерывает цепочку; ``change_timezone`` применяется и не прерывает.
+    ``delete`` прерывает цепочку; ``change_timezone`` и ``set_status`` применяются
+    и не прерывают.
     """
     summary = str(event.get("SUMMARY", ""))
     for rule in rules:
@@ -315,6 +321,37 @@ def apply_rules(event: Calendar, rules: list[dict[str, Any]], stats: dict[str, i
             logger.debug("set_status: %r -> %s (маска %r)", summary, status, pattern)
             event["STATUS"] = status.upper()
             stats["status_changed"] += 1
+        elif action == "cancel":
+            rec_id_prop = event.get("RECURRENCE-ID")
+            if rec_id_prop is None:
+                logger.debug("cancel (single event): %r (маска %r)", summary, pattern)
+                stats["canceled"] += 1
+                return True
+            else:
+                uid = event.get("UID")
+                master = masters.get(str(uid)) if uid else None
+                if master is None:
+                    logger.debug(
+                        "cancel (master not found for UID %s): %r (маска %r)",
+                        uid,
+                        summary,
+                        pattern,
+                    )
+                    stats["canceled"] += 1
+                    return True
+                else:
+                    logger.debug(
+                        "cancel: adding EXDATE to master for %r (маска %r)",
+                        summary,
+                        pattern,
+                    )
+                    master.add(
+                        "EXDATE",
+                        rec_id_prop.dt,
+                        parameters=rec_id_prop.params,
+                    )
+                    stats["canceled"] += 1
+                    return True
         else:
             logger.warning("Неизвестное действие %r в правиле (маска %r).", action, pattern)
 
@@ -326,18 +363,26 @@ def apply_tzid_map(cal: Calendar, tzid_map: dict[str, str], stats: dict[str, int
     if not tzid_map:
         return
 
+    # Свойства события, у которых таймзона задаётся через параметр TZID.
+    # Включаем EXDATE, так как отмененные повторения записываются туда.
+    tzid_properties = ("DTSTART", "DTEND", "RECURRENCE-ID", "EXDATE")
+
     # 1. Ссылки на таймзону в событиях.
     for event in cal.walk("VEVENT"):
-        for name in TZID_PROPERTIES:
-            prop = event.get(name)
-            if prop is None:
+        for name in tzid_properties:
+            prop_val = event.get(name)
+            if prop_val is None:
                 continue
-            current = prop.params.get("TZID")
-            if current in tzid_map:
-                new = tzid_map[current]
-                prop.params["TZID"] = new
-                stats["mapped"] += 1
-                logger.debug("map %s: TZID %r -> %r", name, current, new)
+            
+            # icalendar может возвращать список для повторяющихся свойств (например, EXDATE)
+            props = prop_val if isinstance(prop_val, list) else [prop_val]
+            for prop in props:
+                current = prop.params.get("TZID")
+                if current in tzid_map:
+                    new = tzid_map[current]
+                    prop.params["TZID"] = new
+                    stats["mapped"] += 1
+                    logger.debug("map %s: TZID %r -> %r", name, current, new)
 
     # 2. Сами блоки VTIMEZONE — чтобы файл остался самосогласованным.
     for vtz in cal.walk("VTIMEZONE"):
@@ -362,7 +407,17 @@ def process_calendar(cal: Calendar, config: dict[str, Any]) -> dict[str, int]:
         "mapped": 0,
         "vtimezones": 0,
         "status_changed": 0,
+        "canceled": 0,
     }
+
+    # 1. Построим карту мастер-событий по UID.
+    # Мастер-событие — это VEVENT, у которого нет RECURRENCE-ID.
+    masters = {}
+    for comp in cal.subcomponents:
+        if comp.name == "VEVENT" and "RECURRENCE-ID" not in comp:
+            uid = comp.get("UID")
+            if uid:
+                masters[str(uid)] = comp
 
     kept: list[Any] = []
     for component in cal.subcomponents:
@@ -370,7 +425,7 @@ def process_calendar(cal: Calendar, config: dict[str, Any]) -> dict[str, int]:
             kept.append(component)
             continue
         stats["events"] += 1
-        if apply_rules(component, rules, stats):
+        if apply_rules(component, rules, stats, masters):
             continue  # событие удаляется — не добавляем
         kept.append(component)
     cal.subcomponents = kept
@@ -404,10 +459,11 @@ def main(argv: list[str] | None = None) -> int:
     write_calendar(cal, output)
 
     logger.info(
-        "Готово: событий обработано %d, удалено %d, change_timezone %d, "
+        "Готово: событий обработано %d, удалено %d, отменено %d, change_timezone %d, "
         "установлен статус %d, TZID-маппинг %d (VTIMEZONE переименовано %d).",
         stats["events"],
         stats["deleted"],
+        stats["canceled"],
         stats["retimed"],
         stats["status_changed"],
         stats["mapped"],
