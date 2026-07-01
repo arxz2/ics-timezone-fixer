@@ -23,7 +23,7 @@
       "action": "delete"
     },
     {
-      "match": "JustAnExample",
+      "match": "JustAnExample2",
       "action": "change_timezone",
       "parameters": {
         "new_tz": "Europe/Belgrade"
