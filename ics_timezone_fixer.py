@@ -184,6 +184,60 @@ def summary_matches(summary: str, pattern: str) -> bool:
     return fnmatch.fnmatchcase(summary.lower(), pattern.lower())
 
 
+def is_all_day(event: Calendar) -> bool:
+    """Проверяет, является ли событие событием на весь день (DATE вместо DATETIME)."""
+    dtstart_prop = event.get("DTSTART")
+    if not dtstart_prop:
+        return False
+    dtstart = getattr(dtstart_prop, "dt", None)
+    if dtstart is None:
+        return False
+    return type(dtstart) is dt.date
+
+
+def get_duration_hours(event: Calendar) -> float:
+    """Вычисляет длительность события в часах.
+
+    Для событий на весь день один день считается за 24 часа.
+    """
+    dtstart_prop = event.get("DTSTART")
+    dtend_prop = event.get("DTEND")
+    duration_prop = event.get("DURATION")
+
+    if not dtstart_prop:
+        return 0.0
+
+    dtstart = getattr(dtstart_prop, "dt", None)
+    if not dtstart:
+        return 0.0
+
+    if dtend_prop:
+        dtend = getattr(dtend_prop, "dt", None)
+        if dtend:
+            if type(dtstart) is dt.date and type(dtend) is dt.date:
+                delta = dtend - dtstart
+                return delta.total_seconds() / 3600.0
+            elif isinstance(dtstart, dt.datetime) and isinstance(dtend, dt.datetime):
+                try:
+                    delta = dtend - dtstart
+                    return delta.total_seconds() / 3600.0
+                except TypeError:
+                    # Разные типы (naive vs aware). Приводим к naive.
+                    d1 = dtstart.replace(tzinfo=None)
+                    d2 = dtend.replace(tzinfo=None)
+                    return (d2 - d1).total_seconds() / 3600.0
+
+    if duration_prop:
+        duration = getattr(duration_prop, "dt", None)
+        if isinstance(duration, dt.timedelta):
+            return duration.total_seconds() / 3600.0
+
+    if type(dtstart) is dt.date:
+        return 24.0
+
+    return 0.0
+
+
 def relabel_tzid(event: Calendar, new_tzid: str) -> int:
     """Меняет ярлык TZID у временных полей события, сохраняя цифры времени.
 
@@ -220,6 +274,18 @@ def apply_rules(event: Calendar, rules: list[dict[str, Any]], stats: dict[str, i
         if not pattern or not summary_matches(summary, pattern):
             continue
 
+        # Фильтр на весь день
+        all_day_filter = rule.get("all_day")
+        if all_day_filter is not None:
+            if is_all_day(event) != all_day_filter:
+                continue
+
+        # Фильтр по минимальной длительности
+        min_duration_filter = rule.get("min_duration_hours")
+        if min_duration_filter is not None:
+            if get_duration_hours(event) < min_duration_filter:
+                continue
+
         if action == "delete":
             logger.debug("delete: %r (маска %r)", summary, pattern)
             stats["deleted"] += 1
@@ -237,6 +303,18 @@ def apply_rules(event: Calendar, rules: list[dict[str, Any]], stats: dict[str, i
             logger.debug("change_timezone: %r -> %s (маска %r)", summary, new_tz, pattern)
             if relabel_tzid(event, new_tz):
                 stats["retimed"] += 1
+        elif action == "set_status":
+            params = rule.get("parameters") or {}
+            status = params.get("status")
+            if not status:
+                logger.warning(
+                    "Правило set_status без parameters.status пропущено (маска %r).",
+                    pattern,
+                )
+                continue
+            logger.debug("set_status: %r -> %s (маска %r)", summary, status, pattern)
+            event["STATUS"] = status.upper()
+            stats["status_changed"] += 1
         else:
             logger.warning("Неизвестное действие %r в правиле (маска %r).", action, pattern)
 
@@ -277,7 +355,14 @@ def process_calendar(cal: Calendar, config: dict[str, Any]) -> dict[str, int]:
     Удалённые события исключаются из ``cal.subcomponents``. Возвращает статистику.
     """
     rules = config["rules"]
-    stats = {"events": 0, "deleted": 0, "retimed": 0, "mapped": 0, "vtimezones": 0}
+    stats = {
+        "events": 0,
+        "deleted": 0,
+        "retimed": 0,
+        "mapped": 0,
+        "vtimezones": 0,
+        "status_changed": 0,
+    }
 
     kept: list[Any] = []
     for component in cal.subcomponents:
@@ -320,10 +405,11 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.info(
         "Готово: событий обработано %d, удалено %d, change_timezone %d, "
-        "TZID-маппинг %d (VTIMEZONE переименовано %d).",
+        "установлен статус %d, TZID-маппинг %d (VTIMEZONE переименовано %d).",
         stats["events"],
         stats["deleted"],
         stats["retimed"],
+        stats["status_changed"],
         stats["mapped"],
         stats["vtimezones"],
     )

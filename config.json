@@ -13,7 +13,10 @@
     },
     {
       "match": "Canceled: *",
-      "action": "delete"
+      "action": "set_status",
+      "parameters": {
+        "status": "CANCELLED"
+      }
     },
     {
       "match": "AcuHealth Session*",
@@ -25,6 +28,11 @@
       "parameters": {
         "new_tz": "Europe/Belgrade"
       }
+    },
+    {
+      "match": "*",
+      "all_day": true,
+      "action": "delete"
     }
   ]
 }
