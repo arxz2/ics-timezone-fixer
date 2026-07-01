@@ -2,9 +2,18 @@
   "output_file": "processed_calendar.ics",
   "source_url": "",
   "tzid_map": {
-    "Central European Standard Time": "Central Europe Standard Time",
+    "Central Europe Standard Time": "Europe/Budapest",
+    "Central European Standard Time": "Europe/Warsaw",
+    "Central Standard Time": "America/Chicago",
+    "E. Africa Standard Time": "Africa/Nairobi",
+    "Eastern Standard Time": "America/New_York",
+    "GMT Standard Time": "Europe/London",
+    "Georgian Standard Time": "Asia/Tbilisi",
+    "Mountain Standard Time": "America/Denver",
+    "Pacific Standard Time": "America/Los_Angeles",
     "Romance Standard Time": "Europe/Paris",
-    "Russian Standard Time": "Europe/Moscow"
+    "Russian Standard Time": "Europe/Moscow",
+    "Sri Lanka Standard Time": "Asia/Colombo"
   },
   "rules": [
     {
